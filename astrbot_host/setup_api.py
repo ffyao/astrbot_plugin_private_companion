@@ -31,6 +31,10 @@ from .display_names import display_names
 
 
 PREFIX = "/astrbot_plugin_private_companion/setup"
+# Profile editors submit the whole edited field set in one request. The
+# per-field limits (world alone allows 4200 characters and an avatar data URL
+# is about 32 KiB) add up far beyond the 4 KiB the small command routes need.
+PROFILE_BODY_LIMIT = 262144
 logger = logging.getLogger(__name__)
 
 PROACTIVE_TEST_SUGGESTIONS = {
@@ -228,9 +232,10 @@ class SetupWebAPI:
         return username
 
     @staticmethod
-    async def _body(expected: set[str], *, optional: set[str] | frozenset[str] = frozenset()) -> dict:
+    async def _body(expected: set[str], *, optional: set[str] | frozenset[str] = frozenset(),
+                    limit: int = 4096) -> dict:
         raw = await request.body()
-        if len(raw) > 4096:
+        if len(raw) > limit:
             raise ValueError("request is too large")
 
         def unique(pairs):
@@ -804,7 +809,8 @@ class SetupWebAPI:
     async def save_profile(self):
         try:
             username = self._admin()
-            data = await self._body({"target", "operation_key", "edit_token", "changes"})
+            data = await self._body({"target", "operation_key", "edit_token", "changes"},
+                                    limit=PROFILE_BODY_LIMIT)
             target, changes = data["target"], data["changes"]
             if (target not in ("role_profile", "relationship_profile")
                     or type(data["operation_key"]) is not str or not data["operation_key"].strip()

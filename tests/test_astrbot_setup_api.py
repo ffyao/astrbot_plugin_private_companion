@@ -59,6 +59,32 @@ class AstrBotSetupFlowTests(unittest.IsolatedAsyncioTestCase):
         with patch("astrbot_host.setup_api.request", request):
             return await getattr(self.api, name)()
 
+    async def test_profile_save_accepts_the_full_field_set(self):
+        """A generated profile is larger than the 4 KiB small-route body cap.
+
+        ``identity`` (2000), ``personality`` (2400) and ``world`` (4200) alone
+        exceed it, so the save route must use its own limit instead of rejecting
+        the request and surfacing ``setup_profile_invalid``.
+        """
+        body = {
+            "target": "role_profile",
+            "operation_key": "setup-profile-body-limit",
+            "edit_token": "0" * 64,
+            "changes": {"identity": "身" * 2000, "personality": "格" * 2400,
+                        "world": "世" * 4200},
+        }
+        self.assertGreater(len(json.dumps(body, ensure_ascii=False).encode("utf-8")), 4096)
+        reached = []
+
+        async def stop_after_body():
+            reached.append(True)
+            raise TaskError("test_body_accepted", "profile body was accepted")
+
+        with patch.object(self.api, "_setup_context", stop_after_body):
+            result = await self.call("save_profile", body)
+        self.assertTrue(reached, result)
+        self.assertEqual(result["data"]["code"], "test_body_accepted")
+
     async def test_setup_api_has_no_runtime_mode_endpoint_or_status_field(self):
         routes = {route for route, *_ in self.api.routes()}
         self.assertNotIn("/astrbot_plugin_private_companion/setup/mode", routes)
